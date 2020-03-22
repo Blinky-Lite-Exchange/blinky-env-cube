@@ -35,7 +35,7 @@ void setup(void)
   oneWireChipType1 = initOneWireTemperatureProbe(oneWirePowerPin1, oneWireAddress1, &oneWire1);
   oneWireChipType2 = initOneWireTemperatureProbe(oneWirePowerPin2, oneWireAddress2, &oneWire2);
 
-  Serial1.begin(9600);
+  Serial1.begin(115200);
   
 }
 

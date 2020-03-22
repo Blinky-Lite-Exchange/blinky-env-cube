@@ -2,28 +2,21 @@
 #include <OneWire.h>
 #include "dht11.h"
 
-const int led13Pin = 13;
-const int blueLEDPin = 2;
 const int dht11Pin =  3;
 const int oneWirePin1 = 10;
 const int oneWirePowerPin1 = 11;
 const int oneWirePin2 = 4;
 const int oneWirePowerPin2 = 5;
 const int moisturePin = A0;
-
-boolean blueLED = false;
 byte oneWireChipType1;
 byte oneWireAddress1[8];
-
 byte oneWireChipType2;
 byte oneWireAddress2[8];
-
 OneWire  oneWire1(oneWirePin1);
 OneWire  oneWire2(oneWirePin2);
 dht11 DHT11;
 
-
-struct Readings
+struct TransmitData
 {
   float temperature1;
   float temperature2;
@@ -31,70 +24,37 @@ struct Readings
   float humidity;
   float moisture;
 };
-Readings readings;
-
-struct Settings
+struct ReceiveData
 {
-  int readFlag;
+  int loopDelay = 2000;
 };
-Settings settings;
 
-void setup()
+void setupPins()
 {
-  pinMode(led13Pin, OUTPUT);    
-  pinMode(blueLEDPin, OUTPUT);
-  pinMode(moisturePin, INPUT);
+  pinMode(A0, INPUT);
 
   oneWireChipType1 = initOneWireTemperatureProbe(oneWirePowerPin1, oneWireAddress1, &oneWire1);
   oneWireChipType2 = initOneWireTemperatureProbe(oneWirePowerPin2, oneWireAddress2, &oneWire2);
-    
-  Serial1.begin(BAUD_RATE);
-  delay(2000);
-  putSettings();
-  getReadings();
- }
+}
+void processNewSetting(TransmitData* tData, ReceiveData* rData, ReceiveData* newData)
+{
+  rData->loopDelay = newData->loopDelay;
 
-void loop()
-{
-  if(Serial1.available() > 0)
-  {
-    Serial1.readBytes((uint8_t*)&settings, 4);
-    putSettings();
-    getReadings();
-    Serial1.write((uint8_t*)&readings, 20);
-  }
 }
-void putSettings()
+boolean processData(TransmitData* tData, ReceiveData* rData)
 {
-  blueLED = !blueLED;
-  digitalWrite(blueLEDPin, blueLED);
-  digitalWrite(led13Pin, blueLED);
-}
-void getReadings()
-{
-  readings.temperature2 = getOneWireTemperature(&oneWire1, oneWireAddress1, oneWireChipType1);
-  readings.temperature3 = getOneWireTemperature(&oneWire2, oneWireAddress2, oneWireChipType2);
+  tData->temperature2 = getOneWireTemperature(&oneWire1, oneWireAddress1, oneWireChipType1);
+  tData->temperature3 = getOneWireTemperature(&oneWire2, oneWireAddress2, oneWireChipType2);
   DHT11.read(dht11Pin);
-  readings.temperature1 = (float)DHT11.temperature;
-  readings.humidity = (float)DHT11.humidity;
+  tData->temperature1 = (float)DHT11.temperature;
+  tData->humidity = (float)DHT11.humidity;
 
-  readings.moisture = (float) analogRead(moisturePin);
-  readings.moisture = 100.0 * (1024 - readings.moisture) / 1024.0;
+  tData->moisture = (float) analogRead(moisturePin);
+  tData->moisture = 100.0 * (1024 - tData->moisture) / 1024.0;
 
-  Serial1.println(" ");
-  Serial1.print("Temperature1 (°C): ");
-  Serial1.println(readings.temperature1);
-  Serial1.print("Temperature2 (°C): ");
-  Serial1.println(readings.temperature2);
-  Serial1.print("Temperature3 (°C): ");
-  Serial1.println(readings.temperature3);
-  Serial1.print("Humidity (%): ");
-  Serial1.println(readings.humidity);
-  Serial1.print("Moisture (%): ");
-  Serial1.println(readings.moisture);
-
+  delay(rData->loopDelay);
+  return true;
 }
-
 float getOneWireTemperature(OneWire* ow, byte* addr, byte chipType)
 {
   byte i;
@@ -157,4 +117,72 @@ byte initOneWireTemperatureProbe(int powerPin, byte* addr, OneWire* ow)
       return 0;
   } 
   return type_s;
+}
+const int microLEDPin = 13;
+const int commLEDPin = 2;
+boolean commLED = true;
+
+struct TXinfo
+{
+  int cubeInit = 1;
+  int newSettingDone = 0;
+};
+struct RXinfo
+{
+  int newSetting = 0;
+};
+
+struct TX
+{
+  TXinfo txInfo;
+  TransmitData txData;
+};
+struct RX
+{
+  RXinfo rxInfo;
+  ReceiveData rxData;
+};
+TX tx;
+RX rx;
+ReceiveData settingsStorage;
+
+int sizeOfTx = 0;
+int sizeOfRx = 0;
+
+void setup()
+{
+  setupPins();
+  pinMode(microLEDPin, OUTPUT);    
+  pinMode(commLEDPin, OUTPUT);  
+  digitalWrite(commLEDPin, commLED);
+//  digitalWrite(microLEDPin, commLED);
+
+  sizeOfTx = sizeof(tx);
+  sizeOfRx = sizeof(rx);
+  Serial1.begin(BAUD_RATE);
+  delay(1000);
+}
+void loop()
+{
+  boolean goodData = false;
+  goodData = processData(&(tx.txData), &settingsStorage);
+  if (goodData)
+  {
+    tx.txInfo.newSettingDone = 0;
+    if(Serial1.available() > 0)
+    { 
+      commLED = !commLED;
+      digitalWrite(commLEDPin, commLED);
+      Serial1.readBytes((uint8_t*)&rx, sizeOfRx);
+      
+      if (rx.rxInfo.newSetting > 0)
+      {
+        processNewSetting(&(tx.txData), &settingsStorage, &(rx.rxData));
+        tx.txInfo.newSettingDone = 1;
+        tx.txInfo.cubeInit = 0;
+      }
+    }
+    Serial1.write((uint8_t*)&tx, sizeOfTx);
+  }
+  
 }
